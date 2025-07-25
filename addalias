@@ -1,0 +1,132 @@
+import os
+import re
+import yaml
+
+def process_markdown_files(base_directory, base_path):
+    """
+    Process markdown files in the given directory and its subdirectories.
+    Add aliases, url metadata based on the file path, and pathname based on filename.
+    Preserve existing metadata, including double quotes for specific fields.
+    
+    Args:
+        base_directory (str): The directory to start processing from
+        base_path (str): The base path to use in aliases and url metadata
+    """
+    for root, _, files in os.walk(base_directory):
+        for file in files:
+            if file.endswith('.md'):
+                file_path = os.path.join(root, file)
+                
+                # Get relative path from base directory
+                rel_path = os.path.relpath(file_path, base_directory)
+                
+                # Convert to lowercase and replace spaces with hyphens
+                processed_path = rel_path.lower().replace(' ', '-')
+                
+                # Get the filename without extension and process it
+                filename = os.path.splitext(file)[0]
+                processed_filename = filename.lower().replace(' ', '-')
+                pathname = f"/en/sysdig-secure/{processed_filename}"
+                
+                # Remove _index.md at the end if present
+                if processed_path.endswith('_index.md'):
+                    processed_path = processed_path[:-9]
+                elif processed_path.endswith('.md'):
+                    processed_path = processed_path[:-3]
+                
+                # Create full path with provided base_path
+                full_path = os.path.join(base_path, processed_path)
+                
+                # Normalize path separators to forward slashes
+                full_path = full_path.replace('\\', '/')
+                
+                # Read the existing content
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                
+                # Split content into front matter and body
+                parts = content.split('---\n', 2)
+                
+                if len(parts) >= 3:  # Has front matter
+                    front_matter = parts[1]
+                    body = parts[2]
+                    
+                    try:
+                        # Extract fields with their original formatting
+                        fields_to_preserve = ['linkTitle', 'title', 'weight', 'description']
+                        preserved_fields = {}
+                        for field in fields_to_preserve:
+                            match = re.search(fr'^{field}:\s*(.*?)$', front_matter, re.MULTILINE)
+                            if match:
+                                preserved_fields[field] = match.group(0)  # Preserve the entire line
+                        
+                        # Parse existing front matter
+                        metadata = yaml.safe_load(front_matter) or {}
+                        
+                        # Handle aliases
+                        if 'aliases' in metadata:
+                            if not isinstance(metadata['aliases'], list):
+                                metadata['aliases'] = [metadata['aliases']]
+                            if full_path not in metadata['aliases']:
+                                metadata['aliases'].append(full_path)
+                        else:
+                            metadata['aliases'] = [full_path]
+                        
+                        # Update URL and add pathname
+                        metadata['url'] = full_path
+                        metadata['pathname'] = pathname
+                        
+                        # Remove preserved fields from metadata to prevent YAML from modifying them
+                        for field in fields_to_preserve:
+                            metadata.pop(field, None)
+                        
+                        # Convert back to YAML
+                        new_front_matter = yaml.dump(metadata, default_flow_style=False, allow_unicode=True)
+                        
+                        # Restore preserved fields with original formatting
+                        for field, value in preserved_fields.items():
+                            new_front_matter += value + '\n'
+                        
+                        # Reconstruct the file content
+                        new_content = f'---\n{new_front_matter}---\n{body}'
+                        
+                    except yaml.YAMLError as e:
+                        print(f"Error parsing YAML in {file_path}: {str(e)}")
+                        continue
+                        
+                else:  # No front matter
+                    # Create new front matter
+                    metadata = {
+                        'aliases': [full_path],
+                        'url': full_path,
+                        'pathname': pathname
+                    }
+                    new_front_matter = yaml.dump(metadata, default_flow_style=False, allow_unicode=True)
+                    new_content = f'---\n{new_front_matter}---\n{content}'
+                
+                # Write the modified content back to the file
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(new_content)
+                
+                print(f'Processed: {file_path}')
+                print(f'Added alias and URL: {full_path}')
+                print(f'Added pathname: {pathname}')
+
+def main():
+    # Get input from user
+    base_directory = input("Enter the base directory path: ")
+    base_path = input("Enter the base path for aliases and URL: ")
+    
+    # Verify the directory exists
+    if not os.path.isdir(base_directory):
+        print(f"Error: Directory '{base_directory}' does not exist.")
+        return
+    
+    try:
+        process_markdown_files(base_directory, base_path)
+        print("\nProcessing completed successfully!")
+    except Exception as e:
+        print(f"An error occurred: {str(e)}")
+
+if __name__ == "__main__":
+    main()
